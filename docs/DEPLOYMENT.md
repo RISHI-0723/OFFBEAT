@@ -1,45 +1,61 @@
-# Deployment
+# Deployment: Vercel (free) + Supabase Postgres (free)
 
-OFFBEAT is one Node process: it serves the built React app and the `/api` routes, and embeds PostgreSQL (PGlite) with its data on disk.
-**Status: nothing has been deployed by this project yet.** The steps below are untested against a hosting provider; the Dockerfile has not been built in this environment (no Docker daemon was running).
+**Status:** code adapted and tested locally (adapter, migrations, import, handler, routing). Nothing is live until the steps below are done and the smoke test in section 6 passes.
 
-## 1. Contract (Monad Testnet only)
-```bash
-npm run chain:wallet      # creates testnet-only keys in .env, prints addresses (never prints keys)
-# fund the DEPLOYER address at https://faucet.monad.xyz  (about 0.3 MON is plenty)
-npm run chain:balance     # confirm funds and that the RPC reports chain 10143
-cd contracts && forge test && forge build && cd ..
-npm run chain:deploy      # refuses any chain other than 10143; writes REWARD_POOL_ADDRESS to .env
+## Architecture
+- Frontend: Vite build in `dist/`, served by Vercel's CDN. `vercel.json` rewrites non-API paths to `/index.html` (direct URLs, refresh, back/forward).
+- API: `api/index.ts` is a Vercel Node.js function wrapping the same Hono app (`server/app.ts`). `/api/*` is rewritten to it with the original URL preserved.
+- Database: Supabase Postgres through the **transaction pooler** (port 6543) using the `postgres` driver with `prepare: false`, one connection per function instance.
+- The function never migrates and never seeds. Both are explicit commands you run from your machine.
+- Rate limits are stored in the `rate_limits` table (migration 002) so they hold across instances (fixed windows).
+- Chain: the existing Monad Testnet contract is only *read* and receipts verified. Nothing here deploys, funds, allocates or claims.
+
+## 1. Put the database URL in a git-ignored file (never in chat)
+Supabase dashboard > Connect > **Transaction pooler** > URI. Create `.env.supabase` in the project root with:
 ```
-Verify the contract on the explorer and note the address and deploy transaction.
-
-## 2. Seed one real, verifiable settlement
-```bash
-npm start                 # in one terminal (loads .env, seeds fictional demo content)
-npm run chain:seed        # in another: link wallets → create → fund → approve → allocate → claim
+DATABASE_URL=postgresql://postgres.<project-ref>:<YOUR-PASSWORD>@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres
 ```
-This uses only public API routes, so the server verifies every receipt exactly as it does for a judge. The resulting hashes appear on `/impact`.
+(`.env.*` is git-ignored.) Special characters in the password must be URL-encoded.
 
-## 3. Host the app
-Any host that runs a container or `npm start` with a **persistent disk**:
+## 2. Apply migrations (additive, safe to re-run)
+```powershell
+$env:ENV_FILE=".env.supabase"; npm run db:migrate
+```
+Creates the tables, RLS (anon/authenticated are read-only on public data only) and `rate_limits`. Re-running is a no-op. Nothing is dropped.
 
+## 3. Load data (choose ONE; both refuse to run on a non-empty database)
+**A. Preserve the existing local data (recommended; keeps the contract-linked pool, wallet links and the 5 verified transactions):**
+```powershell
+$env:ENV_FILE=".env.supabase"
+npm run db:import-local            # dry run: prints row counts only
+npm run db:import-local -- --apply # copies ./data/pg into the empty database in one transaction
+```
+Stop the local dev server first, and copy `data/pg` somewhere as a backup. Use `$env:SOURCE_DATA_DIR` to read from the copy.
+**B. Fresh fictional demo content only (no chain history):** `npm run db:seed`.
+
+## 4. Vercel environment variables (Project > Settings > Environment Variables, Production)
 | Variable | Value |
 |---|---|
-| `NODE_ENV` | `production` |
-| `SESSION_SECRET` | 32+ random bytes (required in production) |
-| `DATA_DIR` | a path on the persistent volume, e.g. `/app/data/pg` |
-| `MONAD_RPC_URL`, `CHAIN_ID`, `EXPLORER_URL` | see `.env.example` |
-| `REWARD_POOL_ADDRESS` | from step 1 |
-| `DEMO_ADMIN_TOKEN` | leave empty to keep `/api/admin/reset` disabled |
+| `DATABASE_URL` | the pooler URI (mark Sensitive) |
+| `SESSION_SECRET` | 32+ random bytes: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (paste straight into Vercel; do not save it) |
+| `MONAD_RPC_URL` | `https://testnet-rpc.monad.xyz` |
+| `CHAIN_ID` | `10143` |
+| `EXPLORER_URL` | `https://testnet.monadvision.com` |
+| `REWARD_POOL_ADDRESS` | `0xd62a8a1e2f39895f9cf810882fff57e97b4f47fa` |
 
-Never set `DEPLOYER_PRIVATE_KEY` or the demo-curator keys on the host; they are only for running scripts from your own machine.
-If the database volume is lost the on-chain data remains, but OFFBEAT's records of it do not: re-run step 2 against a fresh pool.
+`NODE_ENV=production` is set by Vercel. Leave `DEMO_ADMIN_TOKEN` and `ALLOW_PROD_RESET` unset. Never set the deployer or demo-curator private keys. Changing any variable needs a **redeploy** to take effect.
 
-Run the one-off seed from your machine with `API_URL=https://your-host npm run chain:seed` **against a database that has the same contract address configured**.
+## 5. Vercel project settings
+Import `RISHI-0723/OFFBEAT`, branch `main`. Framework preset: Vite. Root directory: `./`. Build command `npm run build`, output `dist` (already in `vercel.json`). Install command: default.
 
-## 4. Pre-submission checklist
-- [ ] Open the public URL in a clean browser profile; `/judge` loads and demo personas sign in.
-- [ ] `/impact` shows receipt-verified transactions whose explorer links open and match.
-- [ ] Contract address in the footer matches the deployed contract.
-- [ ] Complete Path B in `/judge` once with your own wallet.
-- [ ] Demo video ≤ 3 min and pitch ≤ 2 min recorded against the live URL.
+## 6. Smoke test (read-only; no transactions)
+`/api/health` returns `{"ok":true}`; `/api/config` shows chain 10143 and the contract; `/discover` and a deep link refresh load; demo persona sign-in works; `/impact` lists the five existing transactions.
+
+## Troubleshooting
+- `503 Service is not configured correctly`: see the function logs; usually a missing `DATABASE_URL` or `SESSION_SECRET`.
+- `prepared statement ... does not exist`: a driver without `prepare:false` is in use (should not happen here).
+- Password errors: URL-encode special characters; the pooler username is `postgres.<project-ref>`.
+- Local dev is unchanged: `npm run dev` uses embedded PGlite when `DATABASE_URL` is unset.
+
+## Legacy single-container hosting
+`Dockerfile` still works with `DB_DRIVER=pglite` and a persistent volume at `/app/data`.

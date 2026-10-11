@@ -10,7 +10,10 @@ export async function seedDemo(db: Db): Promise<boolean> {
   const existing = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM profiles");
   if (existing[0]!.n > 0) return false;
 
-  await db.tx(async (t) => {
+  return db.tx(async (t) => {
+    // Serialise concurrent seeders and re-check under the lock: a second caller sees the first one's rows and does nothing.
+    await t.query("SELECT pg_advisory_xact_lock(7243002)");
+    if ((await t.query<{ n: number }>("SELECT count(*)::int AS n FROM profiles"))[0]!.n > 0) return false;
     const profile = async (name: string, role: string, persona: boolean) =>
       (await t.query<{ id: string }>("INSERT INTO profiles (display_name, role, is_demo, is_persona) VALUES ($1,$2,true,$3) RETURNING id", [name, role, persona]))[0]!.id;
 
@@ -89,6 +92,6 @@ export async function seedDemo(db: Db): Promise<boolean> {
       t.query("INSERT INTO reward_pools (sponsor_id, event_id, title, description, budget_wei, chain_id, is_demo) VALUES ($1,$2,$3,$4,$5,10143,true)", [sponsor, eventId, title, description, (BigInt(Math.round(Number(mon) * 1e6)) * 10n ** 12n).toString()]);
     await pool("Harbour Listening Night: Discovery Fund (demo)", "Rewards curators whose recommendations brought verified attendees to the listening night. Testnet MON only.", e1, "0.2");
     await pool("Lantern Nights: Discovery Fund (demo)", "A second demo pool, left open so you can walk through create, fund, approve and allocate yourself. Testnet MON only.", e2, "0.1");
+    return true;
   });
-  return true;
 }

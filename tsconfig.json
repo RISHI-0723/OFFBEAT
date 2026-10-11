@@ -17,5 +17,5 @@
     "esModuleInterop": true,
     "types": ["node", "vite/client", "@testing-library/jest-dom"]
   },
-  "include": ["src", "shared", "server", "tests", "vite.config.ts"]
+  "include": ["api", "src", "shared", "server", "tests", "vite.config.ts"]
 }

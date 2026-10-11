@@ -1,7 +1,7 @@
-import { PGlite } from "@electric-sql/pglite";
 import { readdirSync, readFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { PGlite } from "@electric-sql/pglite";
 
 export interface Db {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
@@ -33,8 +33,9 @@ function wrap(q: Queryable, root: PGlite | null): Db {
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** Open an embedded Postgres (PGlite). dataDir "" => in-memory. */
+/** Open an embedded Postgres (PGlite) for LOCAL development and tests only. dataDir "" => in-memory. Runs migrations. */
 export async function openDb(dataDir: string): Promise<Db> {
+  const { PGlite } = await import("@electric-sql/pglite");
   if (dataDir) mkdirSync(dataDir, { recursive: true });
   const pg = dataDir ? new PGlite(dataDir) : new PGlite();
   await pg.waitReady;
@@ -43,16 +44,21 @@ export async function openDb(dataDir: string): Promise<Db> {
   return db;
 }
 
-export async function migrate(db: Db): Promise<void> {
+/** Apply pending migrations. Additive only; each file runs in its own transaction under an advisory lock. */
+export async function migrate(db: Db): Promise<string[]> {
   await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`);
   const dir = join(here, "..", "db", "migrations");
   const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
-  const applied = new Set((await db.query<{ name: string }>("SELECT name FROM schema_migrations")).map((r) => r.name));
+  const ran: string[] = [];
   for (const f of files) {
-    if (applied.has(f)) continue;
     await db.tx(async (t) => {
+      await t.query("SELECT pg_advisory_xact_lock(7243001)"); // serialises concurrent migrators
+      const done = await t.query("SELECT 1 FROM schema_migrations WHERE name = $1", [f]);
+      if (done.length) return;
       await t.exec(readFileSync(join(dir, f), "utf8"));
       await t.query("INSERT INTO schema_migrations (name) VALUES ($1)", [f]);
+      ran.push(f);
     });
   }
+  return ran;
 }

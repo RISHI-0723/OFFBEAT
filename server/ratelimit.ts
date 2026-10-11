@@ -21,3 +21,30 @@ export class RateLimiter {
     return true;
   }
 }
+
+import type { Db } from "./db";
+
+/**
+ * Fixed-window limiter shared by every function instance through the database (one atomic upsert per attempt).
+ * Windows are coarser than the sliding limiter above (a burst can straddle a boundary), which is acceptable here.
+ */
+export class DbRateLimiter {
+  constructor(
+    private db: Db,
+    private name: string,
+    private max: number,
+    private windowMs: number,
+    private now: () => number = Date.now,
+  ) {}
+
+  async take(key: string): Promise<boolean> {
+    const t = this.now();
+    const start = new Date(Math.floor(t / this.windowMs) * this.windowMs);
+    const rows = await this.db.query<{ hits: number }>(
+      "INSERT INTO rate_limits (key, window_start, hits) VALUES ($1, $2, 1) ON CONFLICT (key, window_start) DO UPDATE SET hits = rate_limits.hits + 1 RETURNING hits",
+      [`${this.name}:${key}`, start],
+    );
+    if (Math.random() < 0.01) await this.db.query("DELETE FROM rate_limits WHERE window_start < now() - interval '2 hours'").catch(() => []);
+    return rows[0]!.hits <= this.max;
+  }
+}

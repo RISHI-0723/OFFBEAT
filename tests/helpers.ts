@@ -13,12 +13,15 @@ export const testConfig: Config = {
   isProd: false,
   port: 0,
   sessionSecret: "x".repeat(40),
+  dbDriver: "pglite",
+  databaseUrl: null,
   dataDir: "",
   rpcUrl: "http://localhost:0",
   chainId: 10143,
   explorerUrl: "https://testnet.monadvision.com",
   contractAddress: CONTRACT,
   adminToken: "",
+  allowProdReset: false,
 };
 
 export class FakeChain implements ChainReader {

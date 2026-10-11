@@ -14,6 +14,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:contracts": "cd contracts && forge test",
+    "db:migrate": "tsx server/scripts/migrate.ts",
+    "db:seed": "tsx server/scripts/seed.ts",
+    "db:import-local": "tsx server/scripts/import-local.ts",
     "db:reset": "tsx server/scripts/reset.ts",
     "chain:deploy": "tsx server/scripts/deploy.ts",
     "chain:wallet": "tsx server/scripts/wallet.ts",
@@ -30,6 +33,7 @@
     "@tanstack/react-query": "^5.104.1",
     "hono": "^4.13.13",
     "lucide-react": "^1.55.0",
+    "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -39,6 +43,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",

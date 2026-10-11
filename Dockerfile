@@ -5,6 +5,6 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
-ENV NODE_ENV=production PORT=8787 DATA_DIR=/app/data/pg
+ENV NODE_ENV=production PORT=8787 DATA_DIR=/app/data/pg DB_DRIVER=pglite
 EXPOSE 8787
 CMD ["npm", "start"]

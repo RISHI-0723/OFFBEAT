@@ -9,7 +9,7 @@ import type { Config } from "./config";
 import type { Db } from "./db";
 import { requireViewer, sessionMiddleware, signSession, type AppEnv } from "./auth";
 import type { ChainReader } from "./chain";
-import { RateLimiter } from "./ratelimit";
+import { DbRateLimiter } from "./ratelimit";
 import { HttpError, isAddress, isTxHash, newReferralCode, slugify } from "./util";
 import { audit, getCreator, getEvent, getRecommendation, listCreators, listEvents, listRecommendations } from "./services/data";
 import { issueDoorToken, performCheckin } from "./services/checkin";
@@ -38,7 +38,7 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
   const app = new Hono<AppEnv>();
 
   const ip = (c: Context) => {
-    // Behind one trusted proxy the right-most entry is the address the proxy saw. In dev/tests the first entry is honoured.
+    // Behind one trusted proxy (Vercel's edge sets x-forwarded-for to the client address) the right-most entry is the address the proxy saw. In dev/tests the first entry is honoured.
     const fwd = c.req.header("x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean);
     if (fwd?.length) return config.isProd ? fwd[fwd.length - 1]! : fwd[0]!;
     try {
@@ -48,15 +48,15 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
     }
   };
   const limits = {
-    guest: new RateLimiter(10, 60 * 60 * 1000),
-    login: new RateLimiter(30, 60 * 1000),
-    checkin: new RateLimiter(12, 60 * 1000),
-    token: new RateLimiter(60, 60 * 1000),
-    write: new RateLimiter(30, 60 * 60 * 1000),
-    record: new RateLimiter(30, 60 * 1000),
+    guest: new DbRateLimiter(db, "guest", 10, 60 * 60 * 1000),
+    login: new DbRateLimiter(db, "login", 30, 60 * 1000),
+    checkin: new DbRateLimiter(db, "checkin", 12, 60 * 1000),
+    token: new DbRateLimiter(db, "token", 60, 60 * 1000),
+    write: new DbRateLimiter(db, "write", 30, 60 * 60 * 1000),
+    record: new DbRateLimiter(db, "record", 30, 60 * 1000),
   };
-  const limit = (l: RateLimiter, key: string, what: string) => {
-    if (!l.take(key)) throw new HttpError(429, `Too many ${what} attempts. Slow down and try again shortly.`, "rate_limited");
+  const limit = async (l: DbRateLimiter, key: string, what: string) => {
+    if (!(await l.take(key))) throw new HttpError(429, `Too many ${what} attempts. Slow down and try again shortly.`, "rate_limited");
   };
 
   app.use("*", async (c, next) => {
@@ -107,14 +107,14 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
     c.json(await db.query("SELECT id, display_name AS \"displayName\", role FROM profiles WHERE is_persona = true ORDER BY role, display_name")),
   );
   app.post("/api/auth/demo", async (c) => {
-    limit(limits.login, ip(c), "sign-in");
+    await limit(limits.login, ip(c), "sign-in");
     const { profileId } = await json(c, z.object({ profileId: z.string().uuid() }));
     const p = (await db.query<{ id: string }>("SELECT id FROM profiles WHERE id = $1 AND is_persona = true", [profileId]))[0];
     if (!p) throw new HttpError(404, "Demo persona not found.");
     return c.json({ token: signSession(config.sessionSecret, p.id) });
   });
   app.post("/api/auth/guest", async (c) => {
-    limit(limits.guest, ip(c), "sign-up");
+    await limit(limits.guest, ip(c), "sign-up");
     const input = await json(c, z.object({ displayName: trimmed(2, 40), role: z.enum(["curator", "participant", "sponsor"]) }));
     const p = (await db.query<{ id: string }>("INSERT INTO profiles (display_name, role) VALUES ($1,$2) RETURNING id", [input.displayName, input.role]))[0]!;
     await audit(db, p.id, "profile.created", "profile", p.id, { role: input.role });
@@ -130,7 +130,7 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
   });
   app.post("/api/me/wallet", async (c) => {
     const v = requireViewer(c);
-    limit(limits.login, v.id, "wallet-link");
+    await limit(limits.login, v.id, "wallet-link");
     const { address, signature } = await json(c, z.object({ address: z.string(), signature: z.string().regex(/^0x[0-9a-fA-F]+$/) }));
     if (!isAddress(address)) throw new HttpError(422, "Invalid wallet address.");
     const row = (await db.query<{ wallet_nonce: string | null }>("SELECT wallet_nonce FROM profiles WHERE id = $1", [v.id]))[0];
@@ -206,7 +206,7 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
   // ---------- recommendations (curators) ----------
   app.post("/api/recommendations", async (c) => {
     const v = requireViewer(c, "curator");
-    limit(limits.write, v.id, "submission");
+    await limit(limits.write, v.id, "submission");
     const input = await json(c, recommendationInput);
 
     const rec = await db.tx(async (t) => {
@@ -257,7 +257,7 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
 
   app.post("/api/recommendations/:id/ratings", async (c) => {
     const v = requireViewer(c);
-    limit(limits.write, v.id, "rating");
+    await limit(limits.write, v.id, "rating");
     const { stars } = await json(c, z.object({ stars: z.number().int().min(1).max(5) }));
     const rec = await getRecommendation(db, c.req.param("id"));
     if (!rec || rec.status !== "published") throw new HttpError(404, "Recommendation not found.");
@@ -272,13 +272,13 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
   // ---------- proof of discovery ----------
   app.post("/api/events/:id/tokens", async (c) => {
     const v = requireViewer(c);
-    limit(limits.token, v.id, "token");
+    await limit(limits.token, v.id, "token");
     return c.json(await issueDoorToken(db, v, c.req.param("id")), 201);
   });
   app.post("/api/checkins", async (c) => {
     const v = requireViewer(c);
-    limit(limits.checkin, `${v.id}`, "check-in");
-    limit(limits.checkin, `ip:${ip(c)}`, "check-in");
+    await limit(limits.checkin, `${v.id}`, "check-in");
+    await limit(limits.checkin, `ip:${ip(c)}`, "check-in");
     const input = await json(c, z.object({ eventId: z.string().uuid(), token: z.string().min(10).max(80), referralCode: z.string().regex(/^[A-Za-z2-9]{8}$/).optional().or(z.literal("").transform(() => undefined)) }));
     return c.json(await performCheckin(db, v, input), 201);
   });
@@ -294,7 +294,7 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
   });
   app.post("/api/pools", async (c) => {
     const v = requireViewer(c, "sponsor");
-    limit(limits.write, v.id, "pool");
+    await limit(limits.write, v.id, "pool");
     const input = await json(c, z.object({ title: trimmed(4, 120), description: z.string().trim().max(400).default(""), eventId: z.string().uuid(), budgetMon: z.string() }));
     const budget = parseMon(input.budgetMon);
     if (budget === null || budget <= 0n) throw new HttpError(422, "Budget must be a positive MON amount, e.g. 0.5", "bad_budget");
@@ -336,7 +336,7 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
 
   app.post("/api/chain/record", async (c) => {
     const v = requireViewer(c);
-    limit(limits.record, v.id, "verification");
+    await limit(limits.record, v.id, "verification");
     const input = await json(c, z.object({ kind: z.enum(["create_pool", "fund_pool", "allocate", "claim", "close_pool"]), txHash: z.string(), poolId: z.string().uuid().optional(), distributionId: z.string().uuid().optional() }));
     if (!isTxHash(input.txHash)) throw new HttpError(422, "Invalid transaction hash.");
     const result = await recordTransaction(db, chain, v, { ...input, txHash: input.txHash.toLowerCase() as `0x${string}` });
@@ -348,7 +348,7 @@ export function createApp(deps: { db: Db; config: Config; chain: ChainReader }) 
 
   // ---------- optional demo reset (disabled unless DEMO_ADMIN_TOKEN is set) ----------
   app.post("/api/admin/reset", async (c) => {
-    if (!config.adminToken) throw new HttpError(404, "Not found.");
+    if (!config.adminToken || (config.isProd && !config.allowProdReset)) throw new HttpError(404, "Not found.");
     const supplied = c.req.header("x-admin-token") ?? "";
     if (supplied.length !== config.adminToken.length || supplied !== config.adminToken) throw new HttpError(403, "Forbidden.");
     await resetAndSeed(db);

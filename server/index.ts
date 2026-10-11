@@ -3,13 +3,14 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { existsSync, readFileSync } from "node:fs";
 import { Hono } from "hono";
 import { config } from "./config";
-import { openDb } from "./db";
+import { openDatabase } from "./database";
 import { createChainReader } from "./chain";
 import { createApp } from "./app";
 import { seedDemo } from "./seed";
 
-const db = await openDb(config.dataDir);
-if (await seedDemo(db)) console.log("[offbeat] seeded fictional demo content");
+// Long-running server for LOCAL development and single-container hosting. Vercel uses api/index.ts instead.
+const db = await openDatabase(config);
+if (config.dbDriver === "pglite" && (await seedDemo(db))) console.log("[offbeat] seeded fictional demo content");
 const chain = createChainReader(config);
 const api = createApp({ db, config, chain });
 
@@ -29,5 +30,5 @@ if (existsSync("dist/index.html")) {
 }
 
 serve({ fetch: root.fetch, port: config.port }, (info) => {
-  console.log(`[offbeat] listening on http://localhost:${info.port}  chain=${config.chainId} contract=${chain.contractAddress ?? "(not configured)"}`);
+  console.log(`[offbeat] listening on http://localhost:${info.port}  db=${config.dbDriver} chain=${config.chainId} contract=${chain.contractAddress ?? "(not configured)"}`);
 });
