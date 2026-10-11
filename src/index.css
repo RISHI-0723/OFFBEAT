@@ -1,0 +1,80 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/fraunces";
+
+@theme {
+  --color-bg: #0b0b0f;
+  --color-surface: #14141b;
+  --color-raised: #1b1b24;
+  --color-line: #2b2b36;
+  --color-ink: #f4f1f8;
+  --color-muted: #a6a2b3;
+  --color-accent: #a78bfa;
+  --color-accent-strong: #8b5cf6;
+  --color-ok: #b7f171;
+  --color-warn: #f6c76b;
+  --color-bad: #f28b82;
+  --font-display: "Fraunces Variable", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius-card: 18px;
+  --radius-control: 12px;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+  h1, h2, h3 {
+    @apply font-display;
+    font-optical-sizing: auto;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+  p { text-wrap: pretty; }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+  ::selection { background: color-mix(in oklab, var(--color-accent) 40%, transparent); }
+  .tnum { font-variant-numeric: tabular-nums; }
+}
+
+@layer utilities {
+  .enter { animation: enter 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .enter-2 { animation-delay: 70ms; }
+  .enter-3 { animation-delay: 140ms; }
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.18;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+}
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,26 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+data/
+*.log
+.DS_Store
+contracts/out
+contracts/cache
+contracts/broadcast
+# Local databases and runtime files
+db/data/
+*.sqlite
+*.sqlite3
+*.db
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Build and dependencies
+node_modules/
+dist/contracts/lib/forge-std/
+contracts/lib/forge-std/

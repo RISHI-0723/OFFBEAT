@@ -1,0 +1,31 @@
+import { parseAbi } from "viem";
+
+/** Human-readable ABI of contracts/src/RewardPool.sol (kept in sync by tests/abi.test.ts against forge output when built). */
+export const rewardPoolAbi = parseAbi([
+  "function createPool(string title) returns (uint256 poolId)",
+  "function fundPool(uint256 poolId) payable",
+  "function allocateRewards(uint256 poolId, address[] recipients, uint256[] amounts)",
+  "function claimReward(uint256 poolId)",
+  "function closePool(uint256 poolId)",
+  "function getPool(uint256 poolId) view returns (address manager, uint256 funded, uint256 allocated, uint256 claimed, bool closed)",
+  "function claimable(uint256 poolId, address recipient) view returns (uint256)",
+  "function nextPoolId() view returns (uint256)",
+  "event PoolCreated(uint256 indexed poolId, address indexed manager, string title)",
+  "event PoolFunded(uint256 indexed poolId, address indexed funder, uint256 amount)",
+  "event RewardAllocated(uint256 indexed poolId, address indexed recipient, uint256 amount)",
+  "event RewardClaimed(uint256 indexed poolId, address indexed recipient, uint256 amount)",
+  "event PoolClosed(uint256 indexed poolId, address indexed manager, uint256 refunded)",
+  "error NotManager()",
+  "error PoolNotFound()",
+  "error PoolIsClosed()",
+  "error ZeroAmount()",
+  "error LengthMismatch()",
+  "error EmptyAllocation()",
+  "error TooManyRecipients()",
+  "error ZeroAddress()",
+  "error AlreadyAllocated(address recipient)",
+  "error InsufficientPoolBalance(uint256 available, uint256 requested)",
+  "error NothingToClaim()",
+  "error TransferFailed()",
+  "error Reentrancy()",
+]);
