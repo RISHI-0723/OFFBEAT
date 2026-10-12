@@ -83,6 +83,11 @@ describe("row-level security (anon / authenticated API roles)", () => {
     for (const t of ["profiles", "checkins", "checkin_tokens", "ratings", "audit_events"]) await expect(asRole("anon", () => db.query(`SELECT * FROM ${t}`))).rejects.toThrow(/permission denied/);
   });
 
+  it("anon cannot write through the public_profiles view", async () => {
+    for (const sql of ["INSERT INTO public_profiles (display_name, role) VALUES ('Hacker','curator')", "UPDATE public_profiles SET display_name = 'x'", "DELETE FROM public_profiles"])
+      await expect(asRole("anon", () => db.query(sql))).rejects.toThrow(/permission denied/);
+  });
+
   it("anon can read public data, never unpublished recommendations, and profiles only via the safe view", async () => {
     await db.query("UPDATE recommendations SET status = 'pending_review' WHERE id = (SELECT id FROM recommendations LIMIT 1)");
     const all = await db.query<{ n: number }>("SELECT count(*)::int n FROM recommendations");

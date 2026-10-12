@@ -30,7 +30,7 @@ describe("postgres adapter", () => {
   it("applies migrations once and is idempotent", async () => {
     expect(await migrate(db)).toEqual([]);
     const names = (await db.query<{ name: string }>("SELECT name FROM schema_migrations ORDER BY name")).map((r) => r.name);
-    expect(names).toEqual(["001_init.sql", "002_rate_limits.sql"]);
+    expect(names).toEqual(["001_init.sql", "002_rate_limits.sql", "003_lock_public_profiles.sql"]);
   });
 
   it("binds parameters instead of interpolating them", async () => {

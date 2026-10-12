@@ -24,3 +24,4 @@ db/data/
 node_modules/
 dist/contracts/lib/forge-std/
 contracts/lib/forge-std/
+.env.supabase
